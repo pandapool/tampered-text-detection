@@ -1,0 +1,90 @@
+# Single source of truth for paths, resolutions, thresholds and hyperparameters.
+# Override any key from the CLI: python scripts/xx.py --set train.lr=5e-5 data.root=/data
+
+seed: 0
+work_dir: runs/default          # every phase writes under here
+
+model:
+  mllm: Qwen/Qwen2.5-VL-3B-Instruct   # stretch goal: Qwen/Qwen2.5-VL-7B-Instruct
+  load_4bit: true                     # NF4 LLM, bf16 ViT
+  compute_dtype: bfloat16
+  attn_implementation: sdpa
+  expert: facebook/dinov2-large
+
+data:
+  root: data/doctamper                # holds TrainingSet/, TestingSet/, FCD/, SCD/ LMDBs
+  train_lmdb: TrainingSet
+  test_lmdbs: [TestingSet, FCD, SCD]
+  img_size: 504                       # paper: 512; 504 = 36*14, Qwen and DINOv2 grids align
+  min_box_area: 4                     # px in the 504 frame; smaller components are label noise
+  merge_gap: 0                        # >0 merges boxes closer than this many px
+  max_boxes: 16                       # cap on boxes in a target answer
+  train_subset: 15000
+  val_size: 1500
+  ablation_subset: 5000
+  test_slice: 2000                    # iterate on slices; full sets only for the final table
+
+prompts:
+  global: Detect and localize the tampered text in this image.
+  tf: Is the text '{text}' located at {box} real or tampered?
+  if_: Is this image patch real or tampered?
+
+expert:
+  freeze_blocks: 12                   # of 24; the last 12 are trained
+  epochs: 3
+  batch_size: 4                       # Phase 0: 1.9 GB peak at batch 2, plenty of headroom
+  grad_accum: 2
+  lr: 1.0e-4
+  head_channels: 256
+
+ocr:
+  det_model: PP-OCRv5_mobile_det      # null = PaddleOCR default (server models, ~17 s/img on CPU)
+  rec_model: PP-OCRv5_mobile_rec      # PP-OCRv5 rec covers Chinese + English (DocTamper)
+  conf_thresh: 0.9
+  queries_per_image: 4                # with tampered_frac_target 0.4 -> 2 tampered + 2 real
+  tampered_frac_target: 0.4
+
+mining:
+  iou_thresh: 0.7
+  cross_fit: false                    # true: train M_pre on one half, mine the other, swap
+  crop_scale: 3.0                     # pad tampered box to >= 3x its size
+  crop_min: 64
+
+lora:
+  r: 32
+  alpha: 64
+  dropout: 0.05
+  llm_targets: [self_attn.q_proj, self_attn.k_proj, self_attn.v_proj, self_attn.o_proj,
+                mlp.gate_proj, mlp.up_proj, mlp.down_proj]
+  vit_targets: [attn.qkv, attn.proj, mlp.gate_proj, mlp.up_proj, mlp.down_proj]
+
+train:
+  batch_size: 1
+  grad_accum: 8                       # effective batch 8, as in the paper
+  lr: 1.0e-4
+  betas: [0.9, 0.999]
+  optim: paged_adamw_8bit
+  warmup_ratio: 0.03
+  max_len: 704                        # 324 image tokens + prompt + up to 16 boxes
+  save_every: 500                     # optimiser steps
+  log_every: 10
+  num_workers: 2
+
+stage1:
+  use_tf: true
+  use_if: true
+  epochs: 1
+  max_samples: 30000
+  mix: {global: 1.0, tf: 1.0, if_: 1.0}   # equal sampling weight per source
+
+stage2:
+  epochs: 2
+  use_fgra: true
+  fgra_weight: 1.0
+  fgra_layer: 1                       # hidden_states index; 0 = embeddings variant
+  phi: mlp                            # mlp | linear
+  init_vit: stage1                    # stage1 | original (FGRA-only / Baseline rows)
+
+infer:
+  max_new_tokens: 256
+  batch_size: 1

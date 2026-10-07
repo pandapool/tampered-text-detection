@@ -218,3 +218,13 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- project ---
+runs/
+data/
+__pycache__/
+*.egg-info/
+.ipynb_checkpoints/
+.pytest_cache/
+# arXiv paper: not redistributable under arXiv's default licence; see README for the link
+2609.36145v1.pdf

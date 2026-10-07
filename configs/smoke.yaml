@@ -1,0 +1,20 @@
+# Tiny end-to-end run on the synthetic dataset (scripts/make_synthetic.py). Checks plumbing only.
+_base: default.yaml
+work_dir: runs/smoke
+data:
+  root: data/synthetic
+  train_subset: 200
+  val_size: 20
+  ablation_subset: 60
+  test_slice: 20
+expert:
+  epochs: 1
+train:
+  save_every: 10
+  log_every: 2
+stage1:
+  max_samples: 64
+stage2:
+  epochs: 1
+infer:
+  max_new_tokens: 128
